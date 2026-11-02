@@ -12,7 +12,9 @@ const VARIANT_BY_PERSONA_ID = {
     designer: 'nego',
     devil: 'client',
 };
-const HIDDEN_PROP_PATTERN = /_(gavel_handle|gavel_head|folder|laptop_base|laptop_screen|laptop_glow|notepad|key|keyring)$/;
+const HIDDEN_PROP_PATTERN = /_(gavel_handle|gavel_head|folder|laptop_base|laptop_screen|laptop_glow|notepad|key|keyring|scarf|scarf_tail)$/;
+const FRAME_MATERIAL_NAME = 'frame_gestion';
+const FRAME_COLOR = '#4a3a2a';
 const TINTED_MATERIAL_PATTERN = /^(jacket|collar)_/;
 const RENDER_SIZE_PX = 160;
 const FRAME_INTERVAL_MS = 1000 / 30;
@@ -60,6 +62,10 @@ function buildAvatarScene({THREE, model}, variant, toneColor) {
     figure.traverse((object) => {
         if (!object.isMesh) return;
         if (HIDDEN_PROP_PATTERN.test(object.name)) object.visible = false;
+        if (object.material.name === FRAME_MATERIAL_NAME) {
+            object.material = object.material.clone();
+            object.material.color = new THREE.Color(FRAME_COLOR);
+        }
         if (TINTED_MATERIAL_PATTERN.test(object.material.name) && toneColor) {
             object.material = object.material.clone();
             object.material.color = new THREE.Color(toneColor);

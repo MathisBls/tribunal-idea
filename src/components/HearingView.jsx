@@ -1,6 +1,7 @@
 import {lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 
 import Avatar from './Avatar.jsx';
+import GuestList from './GuestList.jsx';
 import {api} from '../api.js';
 import {buildSeatPositions} from '../seat-layout.js';
 import {parseVerdict} from '../verdict.js';
@@ -189,6 +190,7 @@ function CourtFloor({hearing, judge, clerk, members}) {
             <div className="bar is-readonly">
                 <span className="bar-label">À la barre</span>
                 <p className="bar-question">{hearing.question}</p>
+                {(hearing.guests ?? []).length > 0 && <GuestList guests={hearing.guests} isReadOnly />}
             </div>
 
             {hasClerk && (

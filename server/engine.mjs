@@ -22,6 +22,14 @@ const CLERK_RULES = `Tu es le greffier d'un tribunal fictif qui aide à trancher
 Avec les outils fournis, uniquement en lecture, rassemble les faits utiles : éléments cités dans la question (tickets, pull requests, pages), puis ce que tu retrouves par recherche si c'est pertinent. Ne modifie jamais rien et n'invente rien.
 N'écris rien pendant tes recherches. À la fin, rends un dossier factuel en texte simple, sans markdown, 200 mots maximum, en citant les références (clé de ticket, numéro de PR, titre de page). Si tu ne trouves rien d'utile, dis-le en une phrase.`;
 
+const MAX_GUESTS = 8;
+const MAX_GUEST_NAME_LENGTH = 40;
+
+const sanitizeGuests = (guests) =>
+    [...new Set((Array.isArray(guests) ? guests : []).map((guest) => String(guest?.name ?? '').trim().slice(0, MAX_GUEST_NAME_LENGTH)).filter(Boolean))]
+        .slice(0, MAX_GUESTS)
+        .map((name) => ({name}));
+
 const clampNumber = (value, min, max, fallback) => {
     const number = Number.parseInt(value, 10);
     return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
@@ -120,7 +128,7 @@ export function createEngine(onUpdate) {
 
     return {
         isRunning: () => Boolean(running),
-        open({question, context, memberIds, model, rounds, sources}, availableSources = []) {
+        open({question, context, memberIds, model, rounds, sources, guests}, availableSources = []) {
             if (running) throw new Error('Une audience est déjà en cours');
             const cleanQuestion = String(question ?? '').trim().slice(0, 2000);
             if (!cleanQuestion) throw new Error('Posez la question à trancher');
@@ -136,6 +144,7 @@ export function createEngine(onUpdate) {
                 model: ALLOWED_MODELS.includes(model) ? model : ALLOWED_MODELS[0],
                 rounds: clampNumber(rounds, MIN_ROUNDS, MAX_ROUNDS, 2),
                 sources: chosenSources.map((source) => source.name),
+                guests: sanitizeGuests(guests),
                 allowedTools: chosenSources.flatMap((source) => source.readTools),
                 status: 'en_cours',
                 round: 0,

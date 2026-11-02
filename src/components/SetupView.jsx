@@ -1,13 +1,16 @@
 import {useEffect, useMemo, useState} from 'react';
 
 import Avatar from './Avatar.jsx';
+import GuestList from './GuestList.jsx';
 import PersonaEditor from './PersonaEditor.jsx';
+import Select from './Select.jsx';
 import {api} from '../api.js';
 import {buildSeatPositions} from '../seat-layout.js';
 
 const DEFAULT_SEAT_COUNT = 4;
 const DRAG_TYPE = 'application/x-tribunal-persona';
 const CONNECTED_STATUS = 'connected';
+const MODEL_HINTS = {sonnet: 'Équilibré', opus: 'Le plus fin, plus lent', haiku: 'Rapide et léger'};
 
 const readDrag = (event) => {
     try {
@@ -31,6 +34,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [mcpSources, setMcpSources] = useState(null);
     const [selectedSources, setSelectedSources] = useState([]);
+    const [guests, setGuests] = useState([]);
 
     useEffect(() => {
         api.mcpSources().then(setMcpSources).catch(() => setMcpSources([]));
@@ -39,6 +43,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
     const personaById = new Map(personas.map((persona) => [persona.id, persona]));
     const seatedIds = new Set(seats.filter(Boolean));
     const filledSeats = seats.filter((id) => id && personaById.has(id));
+    const modelOptions = config.models.map((option) => ({value: option, label: option.charAt(0).toUpperCase() + option.slice(1), hint: MODEL_HINTS[option]}));
     const seatPositions = useMemo(() => buildSeatPositions(seats.length), [seats.length]);
     const canOpen = isClaudeReady && !isBusy && question.trim().length > 0 && filledSeats.length >= config.minSeats && !isSubmitting;
 
@@ -82,7 +87,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
         setError('');
         setIsSubmitting(true);
         try {
-            await onOpenHearing({question, context, memberIds: filledSeats, model, rounds, sources: selectedSources});
+            await onOpenHearing({question, context, memberIds: filledSeats, model, rounds, sources: selectedSources, guests});
         } catch (openError) {
             setError(openError.message);
         } finally {
@@ -162,6 +167,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                                 + Joindre des pièces au dossier
                             </button>
                         )}
+                        <GuestList guests={guests} onChange={setGuests} />
                     </div>
 
                     <ol className="room-seats">
@@ -306,16 +312,10 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
 
             <section className="launch-bar">
                 <div className="options">
-                    <label className="field inline">
+                    <div className="field inline">
                         <span>Modèle</span>
-                        <select value={model} onChange={(event) => setModel(event.target.value)}>
-                            {config.models.map((option) => (
-                                <option key={option} value={option}>
-                                    {option}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                        <Select value={model} options={modelOptions} onChange={setModel} label="Modèle" />
+                    </div>
                     <div className="field inline">
                         <span>Tours de débat</span>
                         <div className="segmented">
