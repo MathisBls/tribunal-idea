@@ -20,7 +20,7 @@ export const api = {
     addAzureDevOps: (organization) => request('/api/mcp-sources/azure-devops', {method: 'POST', body: {organization}}),
     settings: () => request('/api/settings'),
     saveSettings: (settings) => request('/api/settings', {method: 'POST', body: settings}),
-    createShare: () => request('/api/shares', {method: 'POST'}),
+    createShare: (existing = null) => request('/api/shares', {method: 'POST', body: existing ?? {}}),
     personas: () => request('/api/personas'),
     savePersona: (persona) => request('/api/personas', {method: 'POST', body: persona}),
     deletePersona: (id) => request(`/api/personas/${encodeURIComponent(id)}`, {method: 'DELETE'}),

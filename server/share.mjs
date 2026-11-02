@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 import {COURT_CLERK, PRESIDING_JUDGE} from './default-personas.mjs';
-import {findPersona} from './store.mjs';
+import {findHearingPersona} from './engine.mjs';
 
 const RELAY_URL = 'https://ntfy.sh';
 const TOPIC_PREFIX = 'tribunal-';
@@ -11,6 +11,7 @@ const IV_BYTES = 12;
 const MAX_SHARED_CONTEXT_LENGTH = 1500;
 const MAX_INTERVENTION_LENGTH = 600;
 const MAX_GUEST_NAME_LENGTH = 40;
+const INTERVENTION_EVENT = 'intervention';
 const SHARE_ID_PATTERN = /^tribunal-[A-Za-z0-9_-]{20}$/;
 
 const shares = new Map();
@@ -29,7 +30,7 @@ const decrypt = (key, sealed) => {
     return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(IV_BYTES, bytes.length - 16)), decipher.final()]).toString('utf8'));
 };
 
-const toSharedPersona = (persona) => persona && {id: persona.id, name: persona.name, role: persona.role, color: persona.color, character: persona.character};
+const toSharedPersona = (persona) => persona && {id: persona.id, name: persona.name, role: persona.role, color: persona.color, character: persona.character, proposedBy: persona.proposedBy};
 
 const toSharedMessage = (message) => ({
     id: message.id,
@@ -72,6 +73,7 @@ async function listenToGuests(share, onIntervention) {
                     share.seenInboundIds.add(frame.id);
                     try {
                         const intervention = decrypt(share.key, frame.message);
+                        if (intervention.type !== INTERVENTION_EVENT) continue;
                         const name = String(intervention.name ?? '').trim().slice(0, MAX_GUEST_NAME_LENGTH);
                         const text = String(intervention.text ?? '').trim().slice(0, MAX_INTERVENTION_LENGTH);
                         if (name && text) onIntervention({name, text, targetId: intervention.targetId ?? null});
@@ -86,10 +88,17 @@ async function listenToGuests(share, onIntervention) {
     }
 }
 
-export function createShare() {
+const KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Opens a shared room, or registers again a room the host browser kept (after a refresh or a bridge restart).
+ */
+export function createShare(existing = {}) {
+    const isKnownRoom = SHARE_ID_PATTERN.test(String(existing.shareId ?? '')) && KEY_PATTERN.test(String(existing.key ?? ''));
+    if (isKnownRoom && shares.has(existing.shareId)) return {shareId: existing.shareId, key: existing.key};
     const share = {
-        id: `${TOPIC_PREFIX}${crypto.randomBytes(TOPIC_ID_BYTES).toString('base64url')}`,
-        key: crypto.randomBytes(KEY_BYTES),
+        id: isKnownRoom ? existing.shareId : `${TOPIC_PREFIX}${crypto.randomBytes(TOPIC_ID_BYTES).toString('base64url')}`,
+        key: isKnownRoom ? Buffer.from(existing.key, 'base64url') : crypto.randomBytes(KEY_BYTES),
         createdAt: Date.now(),
         hearingId: null,
         publishedMessageIds: new Set(),
@@ -121,7 +130,7 @@ export function bindShare(shareId, hearing, onIntervention) {
             guests: hearing.guests,
             createdAt: hearing.createdAt,
         },
-        personas: [PRESIDING_JUDGE, COURT_CLERK, ...hearing.memberIds.map(findPersona)].map(toSharedPersona).filter(Boolean),
+        personas: [PRESIDING_JUDGE, COURT_CLERK, ...hearing.memberIds.map((id) => findHearingPersona(hearing, id))].map(toSharedPersona).filter(Boolean),
     });
     listenToGuests(share, onIntervention);
     return true;

@@ -1,5 +1,5 @@
 import {runClaudeTurn} from './claude-cli.mjs';
-import {COURT_CLERK, PRESIDING_JUDGE} from './default-personas.mjs';
+import {COURT_CLERK, PERSONA_CHARACTERS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
 import {findPersona, saveHearing} from './store.mjs';
 
 export const ALLOWED_MODELS = ['sonnet', 'opus', 'haiku'];
@@ -31,6 +31,33 @@ const sanitizeGuests = (guests) =>
         .slice(0, MAX_GUESTS)
         .map((name) => ({name}));
 
+const GUEST_PERSONA_PREFIX = 'guest-persona-';
+const GUEST_PERSONA_ID_PATTERN = /^guest-persona-[A-Za-z0-9_-]{6,40}$/;
+const GUEST_PERSONA_LIMITS = {name: 60, role: 80, persona: 1200, proposedBy: 40};
+
+const clip = (value, max) => String(value ?? '').trim().slice(0, max);
+
+/**
+ * Members created by guests in their own browser: they only exist for the hearing they were proposed to.
+ */
+const sanitizeGuestPersonas = (personas) =>
+    (Array.isArray(personas) ? personas : [])
+        .filter((persona) => GUEST_PERSONA_ID_PATTERN.test(String(persona?.id ?? '')))
+        .slice(0, MAX_SEATS)
+        .map((persona) => ({
+            id: persona.id,
+            name: clip(persona.name, GUEST_PERSONA_LIMITS.name),
+            role: clip(persona.role, GUEST_PERSONA_LIMITS.role),
+            persona: clip(persona.persona, GUEST_PERSONA_LIMITS.persona),
+            color: PERSONA_COLORS.includes(persona.color) ? persona.color : PERSONA_COLORS[0],
+            character: PERSONA_CHARACTERS.some((character) => character.id === persona.character) ? persona.character : PERSONA_CHARACTERS[0].id,
+            proposedBy: clip(persona.proposedBy, GUEST_PERSONA_LIMITS.proposedBy),
+        }))
+        .filter((persona) => persona.name && persona.persona);
+
+export const findHearingPersona = (hearing, id) =>
+    (id?.startsWith(GUEST_PERSONA_PREFIX) ? hearing.extraPersonas?.find((persona) => persona.id === id) : null) ?? findPersona(id);
+
 const clampNumber = (value, min, max, fallback) => {
     const number = Number.parseInt(value, 10);
     return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
@@ -39,7 +66,7 @@ const clampNumber = (value, min, max, fallback) => {
 function buildTranscript(hearing) {
     return hearing.messages
         .filter((message) => message.text && message.kind !== 'erreur')
-        .map((message) => `${message.authorName ?? findPersona(message.personaId)?.name ?? '?'}${message.kind === 'intervention' ? ' (invité, intervient à la barre)' : ''} : ${message.text}`)
+        .map((message) => `${message.authorName ?? findHearingPersona(hearing, message.personaId)?.name ?? '?'}${message.kind === 'intervention' ? ' (invité, intervient à la barre)' : ''} : ${message.text}`)
         .join('\n\n');
 }
 
@@ -48,7 +75,7 @@ function buildPrompt(hearing, instruction) {
     return [
         `Question soumise au tribunal : ${hearing.question}`,
         hearing.context ? `Contexte fourni :\n${hearing.context}` : '',
-        `Membres présents : ${hearing.memberIds.map((id) => findPersona(id)?.name).filter(Boolean).join(', ')}.`,
+        `Membres présents : ${hearing.memberIds.map((id) => findHearingPersona(hearing, id)?.name).filter(Boolean).join(', ')}.`,
         transcript ? `Débat jusqu'ici :\n${transcript}` : '',
         instruction,
     ]
@@ -65,7 +92,7 @@ export function createEngine(onUpdate) {
     };
 
     async function speak(hearing, personaId, instruction, kind, {systemPrompt, allowedTools} = {}) {
-        const persona = findPersona(personaId);
+        const persona = findHearingPersona(hearing, personaId);
         const message = {id: `${hearing.messages.length}-${Date.now()}`, personaId, kind, text: '', isSpeaking: true, at: new Date().toISOString()};
         hearing.messages.push(message);
         hearing.speakerId = personaId;
@@ -152,11 +179,13 @@ export function createEngine(onUpdate) {
 
     return {
         isRunning: () => Boolean(running),
-        open({question, context, memberIds, model, rounds, sources, guests}, availableSources = []) {
+        open({question, context, memberIds, model, rounds, sources, guests, extraPersonas}, availableSources = []) {
             if (running) throw new Error('Une audience est déjà en cours');
             const cleanQuestion = String(question ?? '').trim().slice(0, 2000);
             if (!cleanQuestion) throw new Error('Posez la question à trancher');
-            const seats = [...new Set(Array.isArray(memberIds) ? memberIds : [])].filter((id) => id !== PRESIDING_JUDGE.id && findPersona(id));
+            const guestPersonas = sanitizeGuestPersonas(extraPersonas);
+            const lookup = {extraPersonas: guestPersonas};
+            const seats = [...new Set(Array.isArray(memberIds) ? memberIds : [])].filter((id) => id !== PRESIDING_JUDGE.id && findHearingPersona(lookup, id));
             if (seats.length < MIN_SEATS || seats.length > MAX_SEATS) throw new Error(`Choisissez entre ${MIN_SEATS} et ${MAX_SEATS} membres`);
             const requestedSources = new Set(Array.isArray(sources) ? sources : []);
             const chosenSources = availableSources.filter((source) => requestedSources.has(source.name) && source.readTools.length > 0);
@@ -165,6 +194,7 @@ export function createEngine(onUpdate) {
                 question: cleanQuestion,
                 context: String(context ?? '').trim().slice(0, 6000),
                 memberIds: seats,
+                extraPersonas: guestPersonas.filter((persona) => seats.includes(persona.id)),
                 model: ALLOWED_MODELS.includes(model) ? model : ALLOWED_MODELS[0],
                 rounds: clampNumber(rounds, MIN_ROUNDS, MAX_ROUNDS, 2),
                 sources: chosenSources.map((source) => source.name),

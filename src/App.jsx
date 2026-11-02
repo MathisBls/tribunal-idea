@@ -8,6 +8,7 @@ import HistoryPanel from './components/HistoryPanel.jsx';
 import BridgeSetup from './components/BridgeSetup.jsx';
 import GuestView from './components/GuestView.jsx';
 import {readInvite} from './guest-relay.js';
+import {readHearingIdFromUrl, showHearingInUrl} from './room-state.js';
 import SetupView from './components/SetupView.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import {useSecretWord} from './use-secret-word.js';
@@ -27,7 +28,7 @@ function HostApp() {
     const [personas, setPersonas] = useState([]);
     const [hearings, setHearings] = useState([]);
     const [claudeStatus, setClaudeStatus] = useState(null);
-    const [selectedHearingId, setSelectedHearingId] = useState(null);
+    const [selectedHearingId, setSelectedHearingId] = useState(readHearingIdFromUrl);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isBridgeMissing, setIsBridgeMissing] = useState(false);
     const is3dUnlocked = useSecretWord(SECRET_WORD_3D);
@@ -77,6 +78,11 @@ function HostApp() {
         if (config?.clerk) map.set(config.clerk.id, config.clerk);
         return map;
     }, [personas, config]);
+
+    useEffect(() => {
+        if (selectedHearingId) showHearingInUrl(selectedHearingId);
+        else if (readHearingIdFromUrl()) showHearingInUrl(null);
+    }, [selectedHearingId]);
 
     const selectedHearing = hearings.find((hearing) => hearing.id === selectedHearingId) ?? null;
     const runningHearing = hearings.find((hearing) => ['en_cours', 'deliberation'].includes(hearing.status)) ?? null;

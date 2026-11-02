@@ -227,11 +227,12 @@ export default function HearingView({hearing, personasById, is3dUnlocked = false
     const [isDrawerOpen, setIsDrawerOpen] = useState(true);
     const {width, startResize} = useResizableWidth();
     const isLive = ['en_cours', 'deliberation'].includes(hearing.status);
-    const members = hearing.memberIds.map((id) => personasById.get(id)).filter(Boolean);
+    const courtById = new Map([...personasById, ...(hearing.extraPersonas ?? []).map((persona) => [persona.id, persona])]);
+    const members = hearing.memberIds.map((id) => courtById.get(id)).filter(Boolean);
     const judge = personasById.get(PRESIDING_JUDGE_ID);
     const clerk = personasById.get(CLERK_ID);
     const lastMessage = hearing.messages.at(-1);
-    const resolveAuthor = (message) => personasById.get(message.personaId) ?? (message.authorName ? toGuestPersona({name: message.authorName}, 0) : null);
+    const resolveAuthor = (message) => courtById.get(message.personaId) ?? (message.authorName ? toGuestPersona({name: message.authorName}, 0) : null);
     const sendIntervention = onIntervene ?? ((intervention) => api.intervene(hearing.id, intervention));
     const {scroller, onScroll, jumpToBottom, isAtBottom} = useFollowScroll(`${hearing.messages.length}:${lastMessage?.text?.length ?? 0}:${isDrawerOpen}`);
 
@@ -300,7 +301,7 @@ export default function HearingView({hearing, personasById, is3dUnlocked = false
                         <ol className="transcript">
                             {hearing.messages.map((message) => {
                                 const persona = resolveAuthor(message);
-                                const target = message.targetId ? personasById.get(message.targetId) : null;
+                                const target = message.targetId ? courtById.get(message.targetId) : null;
                                 if (message.kind === 'verdict' && !message.isSpeaking) {
                                     return (
                                         <li key={message.id} className="transcript-verdict">

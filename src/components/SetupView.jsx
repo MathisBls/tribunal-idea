@@ -1,4 +1,4 @@
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 
 import Avatar from './Avatar.jsx';
 import GuestList from './GuestList.jsx';
@@ -6,12 +6,18 @@ import PersonaEditor from './PersonaEditor.jsx';
 import Select from './Select.jsx';
 import SourcePicker from './SourcePicker.jsx';
 import {api} from '../api.js';
-import {buildInviteLink} from '../guest-relay.js';
+import {buildInviteLink, openRelay} from '../guest-relay.js';
+import {forgetRoom, loadRoomFromUrl, readLastSetup, saveRoom, showRoomInUrl} from '../room-state.js';
 import {buildSeatPositions} from '../seat-layout.js';
 
 const DEFAULT_SEAT_COUNT = 4;
 const DRAG_TYPE = 'application/x-tribunal-persona';
 const MODEL_HINTS = {sonnet: 'Équilibré', opus: 'Le plus fin, plus lent', haiku: 'Rapide et léger'};
+const LOBBY_PUBLISH_DELAY_MS = 800;
+const MAX_SHARED_QUESTION_LENGTH = 500;
+
+const toLobbyPersona = (persona) =>
+    persona && {id: persona.id, name: persona.name, role: persona.role, color: persona.color, character: persona.character, proposedBy: persona.proposedBy};
 
 const readDrag = (event) => {
     try {
@@ -22,23 +28,87 @@ const readDrag = (event) => {
 };
 
 export default function SetupView({config, personas, isClaudeReady, isBusy, onOpenHearing, onPersonasChanged}) {
-    const [seats, setSeats] = useState(() => personas.slice(0, DEFAULT_SEAT_COUNT).map((persona) => persona.id).concat(Array(DEFAULT_SEAT_COUNT).fill(null)).slice(0, DEFAULT_SEAT_COUNT));
-    const [question, setQuestion] = useState('');
-    const [context, setContext] = useState('');
-    const [isContextOpen, setIsContextOpen] = useState(false);
-    const [model, setModel] = useState(config.models[0]);
-    const [rounds, setRounds] = useState(2);
+    const [savedRoom] = useState(loadRoomFromUrl);
+    const draft = savedRoom?.draft ?? readLastSetup();
+    const [seats, setSeats] = useState(() => draft.seats?.map((id) => (id && personas.some((persona) => persona.id === id) ? id : null)) ?? personas.slice(0, DEFAULT_SEAT_COUNT).map((persona) => persona.id).concat(Array(DEFAULT_SEAT_COUNT).fill(null)).slice(0, DEFAULT_SEAT_COUNT));
+    const [question, setQuestion] = useState(draft.question ?? '');
+    const [context, setContext] = useState(draft.context ?? '');
+    const [isContextOpen, setIsContextOpen] = useState(Boolean(draft.context));
+    const [model, setModel] = useState(draft.model ?? config.models[0]);
+    const [rounds, setRounds] = useState(draft.rounds ?? 2);
     const [editedPersona, setEditedPersona] = useState(null);
     const [hoveredSeat, setHoveredSeat] = useState(null);
     const [isLobbyHovered, setIsLobbyHovered] = useState(false);
     const [error, setError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [selectedSources, setSelectedSources] = useState([]);
-    const [guests, setGuests] = useState([]);
-    const [share, setShare] = useState(null);
+    const [selectedSources, setSelectedSources] = useState(draft.selectedSources ?? []);
+    const [guests, setGuests] = useState(draft.guests ?? []);
+    const [guestPersonas, setGuestPersonas] = useState(draft.guestPersonas ?? []);
+    const [share, setShare] = useState(savedRoom?.share ?? null);
+    const relay = useRef(null);
 
+    const personaById = new Map([...personas, ...guestPersonas].map((persona) => [persona.id, persona]));
 
-    const personaById = new Map(personas.map((persona) => [persona.id, persona]));
+    useEffect(() => {
+        const registration = savedRoom?.share ? api.createShare(savedRoom.share) : api.createShare();
+        registration
+            .then((registered) => {
+                setShare(registered);
+                showRoomInUrl(registered.shareId);
+            })
+            .catch(() => setShare(null));
+    }, [savedRoom]);
+
+    useEffect(() => {
+        if (!share) return;
+        saveRoom(share.shareId, {share, draft: {question, context, seats, guests, guestPersonas, model, rounds, selectedSources}});
+    }, [share, question, context, seats, guests, guestPersonas, model, rounds, selectedSources]);
+
+    useEffect(() => {
+        if (!share) return undefined;
+        const channel = openRelay(share);
+        relay.current = channel;
+        channel.onGuestEvent((event) => {
+            if (event.type === 'join') {
+                const name = String(event.name ?? '').trim().slice(0, 40);
+                if (name) setGuests((current) => (current.some((guest) => guest.name === name) ? current : [...current, {name}]));
+            }
+            if (event.type === 'propose-member' && event.persona?.id?.startsWith('guest-persona-')) {
+                const persona = {...event.persona, proposedBy: String(event.author ?? '').slice(0, 40)};
+                setGuestPersonas((current) => [...current.filter((existing) => existing.id !== persona.id), persona]);
+                setSeats((current) => {
+                    if (current.includes(persona.id)) return current;
+                    const emptyIndex = current.indexOf(null);
+                    if (emptyIndex >= 0) return current.map((id, index) => (index === emptyIndex ? persona.id : id));
+                    return current.length < config.maxSeats ? [...current, persona.id] : current;
+                });
+            }
+        });
+        return () => {
+            channel.close();
+            relay.current = null;
+        };
+    }, [share, config.maxSeats]);
+
+    useEffect(() => {
+        if (!share) return undefined;
+        const timer = setTimeout(() => {
+            relay.current
+                ?.publishToGuests({
+                    type: 'lobby',
+                    question: question.slice(0, MAX_SHARED_QUESTION_LENGTH),
+                    judge: toLobbyPersona(config.judge),
+                    seats: seats.map((id) => (id ? toLobbyPersona(personaById.get(id)) : null)),
+                    guests,
+                    colors: config.colors,
+                    characters: config.characters,
+                })
+                .catch(() => {});
+        }, LOBBY_PUBLISH_DELAY_MS);
+        return () => clearTimeout(timer);
+        // personaById is derived from personas and guestPersonas, both listed.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [share, question, seats, guests, personas, guestPersonas]);
     const seatedIds = new Set(seats.filter(Boolean));
     const filledSeats = seats.filter((id) => id && personaById.has(id));
     const modelOptions = config.models.map((option) => ({value: option, label: option.charAt(0).toUpperCase() + option.slice(1), hint: MODEL_HINTS[option]}));
@@ -85,16 +155,23 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
         setError('');
         setIsSubmitting(true);
         try {
-            await onOpenHearing({question, context, memberIds: filledSeats, model, rounds, sources: selectedSources, guests, shareId: share?.shareId});
+            await onOpenHearing({
+                question,
+                context,
+                memberIds: filledSeats,
+                model,
+                rounds,
+                sources: selectedSources,
+                guests,
+                shareId: share?.shareId,
+                extraPersonas: guestPersonas.filter((persona) => filledSeats.includes(persona.id)),
+            });
+            if (share) forgetRoom(share.shareId);
         } catch (openError) {
             setError(openError.message);
         } finally {
             setIsSubmitting(false);
         }
-    };
-
-    const ensureShare = () => {
-        if (!share) api.createShare().then(setShare).catch(() => setShare(null));
     };
 
     const toggleSource = (name) => setSelectedSources((current) => (current.includes(name) ? current.filter((source) => source !== name) : [...current, name]));
@@ -164,7 +241,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                                 + Joindre des pièces au dossier
                             </button>
                         )}
-                        <GuestList guests={guests} onChange={setGuests} inviteLink={share ? buildInviteLink(share) : null} onPanelOpen={ensureShare} />
+                        <GuestList guests={guests} onChange={setGuests} inviteLink={share ? buildInviteLink(share) : null} />
                     </div>
 
                     <ol className="room-seats">
@@ -235,7 +312,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                     </button>
                 </div>
                 <ul className="persona-list">
-                    {personas.map((persona) => {
+                    {[...personas, ...guestPersonas].map((persona) => {
                         const isSeated = seatedIds.has(persona.id);
                         return (
                             <li key={persona.id} className={`persona-chip tone-${persona.color}${isSeated ? ' is-seated' : ''}`}>
@@ -252,10 +329,10 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                                     <Avatar persona={persona} size="sm" />
                                     <span className="persona-chip-text">
                                         <strong>{persona.name}</strong>
-                                        <span className="muted small">{isSeated ? 'En séance' : persona.role}</span>
+                                        <span className="muted small">{isSeated ? 'En séance' : persona.proposedBy ? `Proposé par ${persona.proposedBy}` : persona.role}</span>
                                     </span>
                                 </div>
-                                {!persona.builtIn && (
+                                {!persona.builtIn && !persona.proposedBy && (
                                     <button type="button" className="link-button small" onClick={() => setEditedPersona(persona)}>
                                         Modifier
                                     </button>

@@ -2399,3 +2399,21 @@ body.is-resizing {
     padding: 6px 10px;
     font-size: 0.84rem;
 }
+
+/* Guest lobby */
+
+.join-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.live-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.guest-lobby .persona-chip {
+    padding-right: 6px;
+}

@@ -178,7 +178,7 @@ app.post('/api/hearings/:id/intervene', (req, res) => {
     res.json({ok: true});
 });
 
-app.post('/api/shares', (_req, res) => res.json(createShare()));
+app.post('/api/shares', (req, res) => res.json(createShare(req.body ?? {})));
 
 app.post('/api/hearings/:id/adjourn', (req, res) => res.json({ok: engine.adjourn(req.params.id)}));
 

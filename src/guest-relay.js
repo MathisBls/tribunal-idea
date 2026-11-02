@@ -32,27 +32,39 @@ async function seal(cryptoKey, payload) {
 }
 
 /**
- * Follows a shared hearing through the relay: every event is end-to-end encrypted with the key of the invite link.
+ * Encrypted channel of a shared hearing: the host publishes on the hearing topic, guests answer on its inbound topic.
+ * Every event is end-to-end encrypted with the key of the invite link, so the relay only sees opaque messages.
  */
-export function joinHearing({shareId, key}, onEvent) {
+export function openRelay({shareId, key}) {
     const keyPromise = importKey(key);
-    const seenIds = new Set();
-    const source = new EventSource(`${RELAY_URL}/${shareId}/sse?since=all`);
-    source.onmessage = async (frameEvent) => {
-        try {
-            const frame = JSON.parse(frameEvent.data);
-            if (frame.event !== 'message' || seenIds.has(frame.id)) return;
-            seenIds.add(frame.id);
-            onEvent(await open(await keyPromise, frame.message));
-        } catch {
-            // Frames sealed with another key are not part of this hearing.
-        }
+    const sources = [];
+
+    const listen = (topic, onEvent) => {
+        const seenIds = new Set();
+        const source = new EventSource(`${RELAY_URL}/${topic}/sse?since=all`);
+        source.onmessage = async (frameEvent) => {
+            try {
+                const frame = JSON.parse(frameEvent.data);
+                if (frame.event !== 'message' || seenIds.has(frame.id)) return;
+                seenIds.add(frame.id);
+                onEvent(await open(await keyPromise, frame.message));
+            } catch {
+                // Frames sealed with another key are not part of this hearing.
+            }
+        };
+        sources.push(source);
     };
+
+    const post = async (topic, event) => {
+        const response = await fetch(`${RELAY_URL}/${topic}`, {method: 'POST', body: await seal(await keyPromise, event)});
+        if (!response.ok) throw new Error("Impossible de joindre l'audience partagée");
+    };
+
     return {
-        intervene: async ({name, text, targetId}) => {
-            const response = await fetch(`${RELAY_URL}/${shareId}-in`, {method: 'POST', body: await seal(await keyPromise, {name, text, targetId})});
-            if (!response.ok) throw new Error("Impossible d'envoyer l'intervention");
-        },
-        leave: () => source.close(),
+        onHearingEvent: (onEvent) => listen(shareId, onEvent),
+        onGuestEvent: (onEvent) => listen(`${shareId}-in`, onEvent),
+        publishToGuests: (event) => post(shareId, event),
+        publishToHost: (event) => post(`${shareId}-in`, event),
+        close: () => sources.forEach((source) => source.close()),
     };
 }
