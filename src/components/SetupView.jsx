@@ -90,6 +90,11 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
         }
     };
 
+    const refreshSources = () => {
+        setMcpSources(null);
+        api.mcpSources(true).then(setMcpSources).catch(() => setMcpSources([]));
+    };
+
     const toggleSource = (name) => setSelectedSources((current) => (current.includes(name) ? current.filter((source) => source !== name) : [...current, name]));
 
     const savePersona = async (persona) => {
@@ -267,6 +272,9 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                             Le greffier consulte vos outils connectés à Claude Code, en lecture seule, et verse un dossier factuel avant les débats.
                         </p>
                     </div>
+                    <button type="button" className="link-button small" onClick={refreshSources} disabled={mcpSources === null}>
+                        Actualiser
+                    </button>
                 </div>
                 {mcpSources === null ? (
                     <p className="muted small">Recherche de vos outils…</p>
@@ -336,6 +344,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                 <PersonaEditor
                     persona={editedPersona}
                     colors={config.colors}
+                    characters={config.characters}
                     onSave={savePersona}
                     onDelete={deletePersona}
                     onClose={() => setEditedPersona(null)}

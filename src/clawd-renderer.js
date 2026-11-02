@@ -30,7 +30,9 @@ function hashText(text) {
     return hash >>> 0;
 }
 
-export function pickVariant(personaId) {
+export function pickVariant(persona) {
+    const personaId = persona?.id;
+    if (persona?.character) return persona.character;
     if (personaId === 'president') return JUDGE_VARIANT;
     if (personaId === 'clerk') return CLERK_VARIANT;
     return VARIANT_BY_PERSONA_ID[personaId] ?? MEMBER_VARIANTS[hashText(personaId ?? '?') % MEMBER_VARIANTS.length];

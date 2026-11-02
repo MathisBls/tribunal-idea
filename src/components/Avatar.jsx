@@ -10,6 +10,7 @@ export default function Avatar({persona, size = 'md', isSpeaking = false}) {
     const clawd = useRef(null);
     const personaId = persona?.id;
     const color = persona?.color;
+    const variant = pickVariant(persona);
 
     useEffect(() => {
         if (!canvas.current || !container.current) return undefined;
@@ -17,9 +18,9 @@ export default function Avatar({persona, size = 'md', isSpeaking = false}) {
         canvas.current.width = pixelSize;
         canvas.current.height = pixelSize;
         const toneColor = getComputedStyle(container.current).getPropertyValue('--tone').trim();
-        clawd.current = mountClawd(canvas.current, {variant: pickVariant(personaId), toneColor, seed: personaId});
+        clawd.current = mountClawd(canvas.current, {variant, toneColor, seed: personaId});
         return () => clawd.current?.unmount();
-    }, [personaId, color]);
+    }, [personaId, color, variant]);
 
     useEffect(() => {
         clawd.current?.setSpeaking(isSpeaking);

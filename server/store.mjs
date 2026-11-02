@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import {COURT_CLERK, DEFAULT_PERSONAS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
+import {COURT_CLERK, DEFAULT_PERSONAS, PERSONA_CHARACTERS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
 
 const DATA_DIR = process.env.TRIBUNAL_DATA_DIR ?? path.join(os.homedir(), '.tribunal');
 const HEARINGS_DIR = path.join(DATA_DIR, 'hearings');
@@ -44,6 +44,7 @@ function sanitizePersona(input) {
         role: clip(input.role, MAX_FIELD_LENGTH.role),
         persona: clip(input.persona, MAX_FIELD_LENGTH.persona),
         color: PERSONA_COLORS.includes(input.color) ? input.color : PERSONA_COLORS[0],
+        character: PERSONA_CHARACTERS.some((character) => character.id === input.character) ? input.character : PERSONA_CHARACTERS[0].id,
     };
     if (!persona.name || !persona.persona) throw new Error('Un nom et une description sont obligatoires');
     return persona;

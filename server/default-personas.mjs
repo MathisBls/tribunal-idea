@@ -88,4 +88,13 @@ export const DEFAULT_PERSONAS = [
     },
 ];
 
+export const PERSONA_CHARACTERS = [
+    {id: 'nego', label: 'Négociateur', details: 'Nœud papillon, badge'},
+    {id: 'directeur', label: 'Directeur', details: 'Lunettes, cravate, cheveux gris'},
+    {id: 'gestion', label: 'Gestionnaire', details: 'Chignon, lunettes, écharpe'},
+    {id: 'client', label: 'Client', details: 'Casquette en tweed'},
+    {id: 'tech', label: 'Tech', details: 'Casque audio, capuche'},
+    {id: 'juge', label: 'Magistrat', details: 'Robe, toque, jabot'},
+];
+
 export const PERSONA_COLORS = ['coral', 'indigo', 'slate', 'teal', 'plum', 'amber', 'rose', 'red', 'green', 'sky'];

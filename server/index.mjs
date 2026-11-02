@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {discoverMcpSources, readClaudeStatus} from './claude-cli.mjs';
-import {COURT_CLERK, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
+import {COURT_CLERK, PERSONA_CHARACTERS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
 import {ALLOWED_MODELS, MAX_SEATS, MIN_SEATS, createEngine} from './engine.mjs';
 import {deleteHearing, deletePersona, listHearings, listPersonas, savePersona} from './store.mjs';
 
@@ -55,7 +55,7 @@ const engine = createEngine((hearing) => broadcast('hearing', hearing));
 let claudeStatus = readClaudeStatus();
 
 app.get('/api/config', (_req, res) => {
-    res.json({judge: PRESIDING_JUDGE, clerk: COURT_CLERK, colors: PERSONA_COLORS, models: ALLOWED_MODELS, minSeats: MIN_SEATS, maxSeats: MAX_SEATS});
+    res.json({judge: PRESIDING_JUDGE, clerk: COURT_CLERK, colors: PERSONA_COLORS, characters: PERSONA_CHARACTERS, models: ALLOWED_MODELS, minSeats: MIN_SEATS, maxSeats: MAX_SEATS});
 });
 
 app.get('/api/claude-status', (req, res) => {
