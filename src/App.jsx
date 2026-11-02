@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 
 import {api} from './api.js';
+import Avatar from './components/Avatar.jsx';
 import ClaudeStatus from './components/ClaudeStatus.jsx';
 import HearingView from './components/HearingView.jsx';
 import HistoryPanel from './components/HistoryPanel.jsx';
@@ -83,6 +84,7 @@ export default function App() {
         <div className="app">
             <header className="topbar">
                 <button type="button" className="brand" onClick={() => setSelectedHearingId(null)} title="Nouvelle audience">
+                    <Avatar persona={config.judge} size="sm" />
                     Tribunal
                 </button>
                 <div className="topbar-actions">

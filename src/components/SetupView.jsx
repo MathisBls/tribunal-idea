@@ -230,7 +230,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                     {personas.map((persona) => {
                         const isSeated = seatedIds.has(persona.id);
                         return (
-                            <li key={persona.id} className={`persona-chip${isSeated ? ' is-seated' : ''}`}>
+                            <li key={persona.id} className={`persona-chip tone-${persona.color}${isSeated ? ' is-seated' : ''}`}>
                                 <div
                                     className="persona-chip-body"
                                     draggable

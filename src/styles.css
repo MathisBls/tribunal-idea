@@ -1,19 +1,22 @@
 :root {
-    --bg: #f7f6f2;
+    --bg: #faf6f0;
     --surface: #ffffff;
-    --surface-muted: #efeee9;
-    --border: #e2e0d9;
-    --border-strong: #c9c6bc;
+    --surface-muted: #f3ede4;
+    --border: #e8dfd2;
+    --border-strong: #d3c5b2;
     --text: #18181a;
     --text-muted: #66645e;
-    --accent: #7d1d1d;
-    --accent-strong: #5f1414;
-    --accent-soft: #f4e7e5;
+    --accent: #c15f3c;
+    --accent-strong: #a24c2c;
+    --accent-soft: #fbe9e0;
     --on-accent: #ffffff;
     --avatar-bg: #e8e5dd;
-    --floor: #f1efe9;
-    --floor-line: rgb(24 24 26 / 3.5%);
-    --wood: #6b4a33;
+    --floor: #f3ece2;
+    --floor-line: rgb(90 60 30 / 7%);
+    --carpet-trim: #e2b04a;
+    --spotlight: rgb(255 214 150 / 55%);
+    --pedestal: #8a5a3b;
+    --wood: #7a4e2f;
     --wood-edge: #4f3524;
     --on-wood: #f7f1ea;
     --on-wood-muted: #d8c8b8;
@@ -28,36 +31,39 @@
     --font-ui: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-title: 'Source Serif 4', Georgia, 'Times New Roman', serif;
 
-    --tone-gold: #7d1d1d;
-    --tone-coral: #9c5440;
-    --tone-indigo: #3e4e78;
-    --tone-slate: #5b6168;
-    --tone-teal: #2f6560;
-    --tone-plum: #66486a;
-    --tone-amber: #8c6524;
-    --tone-rose: #8f4b5e;
-    --tone-red: #8a2c24;
-    --tone-green: #4a6639;
-    --tone-sky: #38658a;
+    --tone-gold: #c9962f;
+    --tone-coral: #d9694a;
+    --tone-indigo: #4c63c9;
+    --tone-slate: #627080;
+    --tone-teal: #1f9488;
+    --tone-plum: #8f58b0;
+    --tone-amber: #e09a1f;
+    --tone-rose: #d45b86;
+    --tone-red: #c8392e;
+    --tone-green: #3f9a54;
+    --tone-sky: #2f8fd0;
     color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg: #151515;
-        --surface: #1c1c1c;
-        --surface-muted: #242424;
-        --border: #2e2e2e;
-        --border-strong: #444444;
+        --bg: #17130f;
+        --surface: #211b16;
+        --surface-muted: #2b241d;
+        --border: #382e25;
+        --border-strong: #52443a;
         --text: #ebeae6;
         --text-muted: #9c9a94;
-        --accent: #d0675c;
-        --accent-strong: #e07f75;
-        --accent-soft: #33201e;
-        --on-accent: #151515;
+        --accent: #e5835e;
+        --accent-strong: #f09a77;
+        --accent-soft: #3d2519;
+        --on-accent: #1a120c;
         --avatar-bg: #2b2a28;
-        --floor: #191918;
-        --floor-line: rgb(255 255 255 / 2.5%);
+        --floor: #1d1813;
+        --floor-line: rgb(255 230 200 / 4%);
+        --carpet-trim: #b8892f;
+        --spotlight: rgb(255 196 120 / 26%);
+        --pedestal: #5a3a25;
         --wood: #5a3e2b;
         --wood-edge: #3b2819;
         --on-wood: #f2e9df;
@@ -533,10 +539,12 @@ select {
     align-items: center;
     gap: 14px;
     padding: 12px 20px;
-    background: var(--wood);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--wood) 85%, #ffffff), var(--wood));
     color: var(--on-wood);
     border-radius: var(--radius-sm);
-    box-shadow: 0 6px 0 var(--wood-edge);
+    border-top: 3px solid var(--carpet-trim);
+    box-shadow: 0 8px 0 var(--wood-edge), 0 18px 30px rgb(0 0 0 / 22%);
+    z-index: 2;
 }
 
 .bench .muted {
@@ -630,6 +638,63 @@ select {
 
 .seat-occupant {
     cursor: grab;
+    animation: seat-arrive 0.35s ease-out;
+}
+
+.seat-occupant .avatar {
+    box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--tone), 0 10px 18px rgb(0 0 0 / 25%);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.seat-occupant:hover .avatar {
+    transform: translateY(-3px);
+}
+
+.seat-occupant strong {
+    padding: 1px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
+}
+
+.room-seat::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 58px;
+    width: 92px;
+    height: 22px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: var(--pedestal);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.room-seat.is-filled::before {
+    opacity: 0.55;
+}
+
+.room-seat.is-speaking::after {
+    content: '';
+    position: absolute;
+    inset: -40px -20px;
+    background: radial-gradient(circle at 50% 40%, var(--spotlight), transparent 65%);
+    z-index: -1;
+    animation: spotlight-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes seat-arrive {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.9);
+    }
+}
+
+@keyframes spotlight-pulse {
+    50% {
+        opacity: 0.6;
+    }
 }
 
 .seat-occupant:active {
@@ -682,6 +747,17 @@ select {
 }
 
 .room-seat.is-target .seat-chair {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scale(1.08);
+    background: var(--accent-soft);
+}
+
+.seat-chair {
+    transition: transform 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.seat-free:hover .seat-chair {
     border-color: var(--accent);
     color: var(--accent);
 }
@@ -762,8 +838,15 @@ select {
     transition: border-color 0.15s, opacity 0.15s;
 }
 
+.persona-chip {
+    border-left: 4px solid var(--tone);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+    transition: border-color 0.15s, opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
 .persona-chip:hover {
-    border-color: var(--tone, var(--border-strong));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgb(0 0 0 / 12%);
 }
 
 .persona-chip.is-seated {
@@ -833,8 +916,14 @@ select {
 }
 
 .launch-action .button {
-    padding: 10px 22px;
+    padding: 11px 26px;
     font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.launch-action .button:disabled {
+    box-shadow: none;
 }
 
 .segmented {

@@ -2,6 +2,17 @@ const MODEL_URL = '/models/tribunal.glb';
 const JUDGE_VARIANT = 'juge';
 const CLERK_VARIANT = 'gestion';
 const MEMBER_VARIANTS = ['nego', 'directeur', 'client', 'tech', 'gestion'];
+const VARIANT_BY_PERSONA_ID = {
+    'end-user': 'client',
+    'product-owner': 'nego',
+    'lead-dev': 'tech',
+    security: 'directeur',
+    support: 'gestion',
+    finance: 'directeur',
+    designer: 'nego',
+    devil: 'client',
+};
+const HIDDEN_PROP_PATTERN = /_(gavel_handle|gavel_head|folder|laptop_base|laptop_screen|laptop_glow|notepad|key|keyring)$/;
 const TINTED_MATERIAL_PATTERN = /^(jacket|collar)_/;
 const RENDER_SIZE_PX = 160;
 const FRAME_INTERVAL_MS = 1000 / 30;
@@ -22,7 +33,7 @@ function hashText(text) {
 export function pickVariant(personaId) {
     if (personaId === 'president') return JUDGE_VARIANT;
     if (personaId === 'clerk') return CLERK_VARIANT;
-    return MEMBER_VARIANTS[hashText(personaId ?? '?') % MEMBER_VARIANTS.length];
+    return VARIANT_BY_PERSONA_ID[personaId] ?? MEMBER_VARIANTS[hashText(personaId ?? '?') % MEMBER_VARIANTS.length];
 }
 
 async function createEngine() {
@@ -46,6 +57,7 @@ function buildAvatarScene({THREE, model}, variant, toneColor) {
     figure.rotation.set(0, 0, 0);
     figure.traverse((object) => {
         if (!object.isMesh) return;
+        if (HIDDEN_PROP_PATTERN.test(object.name)) object.visible = false;
         if (TINTED_MATERIAL_PATTERN.test(object.material.name) && toneColor) {
             object.material = object.material.clone();
             object.material.color = new THREE.Color(toneColor);
@@ -53,10 +65,15 @@ function buildAvatarScene({THREE, model}, variant, toneColor) {
     });
     const pivot = new THREE.Group();
     pivot.add(figure);
-    const box = new THREE.Box3().setFromObject(pivot);
+    pivot.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    figure.traverse((object) => {
+        if (object.isMesh && object.visible) box.expandByObject(object);
+    });
+    const body = figure.getObjectByName(`${variant}_body`);
+    const bodyCenter = body ? new THREE.Box3().setFromObject(body).getCenter(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    figure.position.set(-center.x, -box.min.y, -center.z);
+    figure.position.set(-bodyCenter.x, -box.min.y, -bodyCenter.z);
 
     const scene = new THREE.Scene();
     scene.add(pivot);
@@ -143,7 +160,10 @@ export function mountClawd(canvas, {variant, toneColor, seed}) {
         .then((engine) => {
             if (avatars.has(avatar)) avatar.rig = buildAvatarScene(engine, variant, toneColor);
         })
-        .catch(() => avatars.delete(avatar));
+        .catch((error) => {
+            console.warn('Clawd avatar unavailable', error);
+            avatars.delete(avatar);
+        });
     if (!isLooping) {
         isLooping = true;
         requestAnimationFrame(renderFrame);
