@@ -7,6 +7,7 @@ const TURN_TIMEOUT_MS = 120_000;
 const TOOL_TURN_TIMEOUT_MS = 300_000;
 const DISCOVERY_TIMEOUT_MS = 60_000;
 const READ_VERBS = new Set(['get', 'list', 'search', 'fetch', 'lookup', 'read', 'query', 'find', 'show', 'view', 'describe']);
+const NOUN_ONLY_BLOCKLIST = new Set(['write', 'upsert', 'upload', 'run', 'build', 'capacity', 'attachment']);
 const WRITE_VERBS = new Set(['create', 'update', 'edit', 'delete', 'remove', 'add', 'transition', 'post', 'comment', 'write', 'set', 'link', 'move', 'merge', 'approve', 'assign', 'upload', 'send', 'run', 'execute', 'trigger', 'queue', 'complete', 'abandon', 'vote', 'batch', 'export', 'import', 'collect']);
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -23,16 +24,19 @@ function resolveClaudeCommand() {
 const CLAUDE_COMMAND = resolveClaudeCommand();
 
 /**
- * Environment of the CLI child: the user's own login is used, never a session inherited from a parent Claude.
+ * Environment of the CLI child: the user's own login is used, never a session inherited from a parent Claude, and
+ * slow MCP servers are awaited so the clerk can use them.
  */
 function buildChildEnvironment() {
-    return Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^CLAUDE_CODE|^CLAUDECODE/i.test(name)));
+    const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^CLAUDE_CODE|^CLAUDECODE/i.test(name)));
+    return {...inherited, MCP_CONNECTION_NONBLOCKING: 'false'};
 }
 
 const toToolPrefix = (serverName) => `mcp__${serverName.replace(/[^A-Za-z0-9_-]/g, '_')}__`;
 
 /**
- * A tool is kept only when its first verb is a read verb, so a persona can never change anything in the user's tools.
+ * A tool is kept only when its first verb is a read verb, or when it names a resource without any verb or write
+ * marker (servers that split reads and `_write` tools), so a persona can never change anything in the user's tools.
  */
 function isReadOnlyTool(toolName) {
     const words = toolName
@@ -40,14 +44,95 @@ function isReadOnlyTool(toolName) {
         .toLowerCase()
         .split(/[^a-z]+/);
     const firstVerb = words.find((word) => READ_VERBS.has(word) || WRITE_VERBS.has(word));
-    return READ_VERBS.has(firstVerb);
+    if (firstVerb) return READ_VERBS.has(firstVerb);
+    return !words.some((word) => NOUN_ONLY_BLOCKLIST.has(word));
+}
+
+const STDIO_LIST_TIMEOUT_MS = 90_000;
+const MCP_PROTOCOL_VERSION = '2025-06-18';
+const PENDING_STATUS = 'pending';
+const USER_ORIGIN = 'user';
+
+function readUserMcpConfig(name) {
+    try {
+        const config = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+        return config.mcpServers?.[name] ?? null;
+    } catch {
+        return null;
+    }
 }
 
 /**
- * Lists the MCP servers of the user's Claude Code with their read-only tools. The CLI is stopped as soon as it has
- * announced its tools, before any request to the model.
+ * Asks a local MCP server for its tools over stdio, for servers that start too slowly to be announced by the CLI.
  */
-export function discoverMcpSources() {
+function listStdioTools({command, args = [], env = {}}) {
+    return new Promise((resolve) => {
+        if (!command) {
+            resolve([]);
+            return;
+        }
+        const child = spawn(command, args, {env: {...process.env, ...env}, windowsHide: true, shell: IS_WINDOWS, stdio: ['pipe', 'pipe', 'ignore']});
+        const timeout = setTimeout(() => finish([]), STDIO_LIST_TIMEOUT_MS);
+        let buffer = '';
+        let isDone = false;
+        const send = (message) => child.stdin.write(`${JSON.stringify({jsonrpc: '2.0', ...message})}\n`);
+        function finish(tools) {
+            if (isDone) return;
+            isDone = true;
+            clearTimeout(timeout);
+            child.kill();
+            resolve(tools);
+        }
+        child.stdout.on('data', (chunk) => {
+            buffer += chunk.toString('utf8');
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+            for (const line of lines) {
+                let message;
+                try {
+                    message = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (message.id === 1) {
+                    send({method: 'notifications/initialized'});
+                    send({id: 2, method: 'tools/list', params: {}});
+                } else if (message.id === 2) {
+                    finish((message.result?.tools ?? []).map((tool) => tool.name));
+                }
+            }
+        });
+        child.on('error', () => finish([]));
+        child.on('close', () => finish([]));
+        send({id: 1, method: 'initialize', params: {protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: {name: 'tribunal', version: '1.0.0'}}});
+    });
+}
+
+async function completePendingSources(sources) {
+    return Promise.all(
+        sources.map(async (source) => {
+            if (source.status !== PENDING_STATUS || source.origin !== USER_ORIGIN) return source;
+            const config = readUserMcpConfig(source.name);
+            const toolNames = config ? await listStdioTools(config) : [];
+            if (toolNames.length === 0) return source;
+            const prefix = toToolPrefix(source.name);
+            return {...source, status: 'connected', readTools: toolNames.filter(isReadOnlyTool).map((toolName) => prefix + toolName)};
+        }),
+    );
+}
+
+/**
+ * Lists the MCP servers of the user's Claude Code with their read-only tools.
+ */
+export async function discoverMcpSources() {
+    return completePendingSources(await readAnnouncedSources());
+}
+
+/**
+ * Reads the servers announced by the CLI, which is stopped as soon as it has listed its tools, before any request to
+ * the model.
+ */
+function readAnnouncedSources() {
     return new Promise((resolve, reject) => {
         const child = spawn(CLAUDE_COMMAND, ['-p', '--model', 'haiku', '--tools', '', '--no-session-persistence', '--output-format', 'stream-json', '--verbose'], {
             env: buildChildEnvironment(),
@@ -74,7 +159,7 @@ export function discoverMcpSources() {
                 const sources = (event.mcp_servers ?? []).map((server) => {
                     const prefix = toToolPrefix(server.name);
                     const readTools = tools.filter((tool) => tool.startsWith(prefix) && isReadOnlyTool(tool.slice(prefix.length)));
-                    return {name: server.name, status: server.status, readTools};
+                    return {name: server.name, status: server.status, origin: server.source ?? null, readTools};
                 });
                 isResolved = true;
                 clearTimeout(timeout);
@@ -93,6 +178,19 @@ export function discoverMcpSources() {
         });
         child.stdin.end('ok');
     });
+}
+
+/**
+ * Registers an MCP server in the user's Claude Code configuration, for every project.
+ */
+export function addMcpServer(name, commandArgs) {
+    const result = spawnSync(CLAUDE_COMMAND, ['mcp', 'add', '--scope', 'user', name, '--', ...commandArgs], {
+        encoding: 'utf8',
+        env: buildChildEnvironment(),
+        shell: IS_WINDOWS && !CLAUDE_COMMAND.endsWith('.exe'),
+        timeout: 30_000,
+    });
+    if (result.error || result.status !== 0) throw new Error((result.stderr || result.stdout || 'Ajout impossible').trim().split('\n').at(-1));
 }
 
 /**

@@ -6,13 +6,23 @@ import ClaudeStatus from './components/ClaudeStatus.jsx';
 import HearingView from './components/HearingView.jsx';
 import HistoryPanel from './components/HistoryPanel.jsx';
 import BridgeSetup from './components/BridgeSetup.jsx';
+import GuestView from './components/GuestView.jsx';
+import {readInvite} from './guest-relay.js';
 import SetupView from './components/SetupView.jsx';
+import ThemeToggle from './components/ThemeToggle.jsx';
 import {useSecretWord} from './use-secret-word.js';
 
 const SECRET_WORD_3D = 'objection';
 const BRIDGE_RETRY_MS = 3000;
 
+const INVITE = readInvite(window.location);
+
 export default function App() {
+    if (INVITE) return <GuestView invite={INVITE} />;
+    return <HostApp />;
+}
+
+function HostApp() {
     const [config, setConfig] = useState(null);
     const [personas, setPersonas] = useState([]);
     const [hearings, setHearings] = useState([]);
@@ -93,6 +103,7 @@ export default function App() {
                             <span className="live-dot" /> Audience en cours
                         </button>
                     )}
+                    <ThemeToggle />
                     <ClaudeStatus status={claudeStatus} onRefresh={() => api.claudeStatus(true).then(setClaudeStatus)} />
                     <button type="button" className="button ghost" onClick={() => setIsHistoryOpen(true)}>
                         Historique <span className="count">{hearings.length}</span>

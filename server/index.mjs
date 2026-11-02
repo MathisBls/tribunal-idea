@@ -3,9 +3,10 @@ import express from 'express';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {discoverMcpSources, readClaudeStatus} from './claude-cli.mjs';
+import {addMcpServer, discoverMcpSources, readClaudeStatus} from './claude-cli.mjs';
 import {COURT_CLERK, PERSONA_CHARACTERS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
 import {ALLOWED_MODELS, MAX_SEATS, MIN_SEATS, createEngine} from './engine.mjs';
+import {bindShare, createShare, isShareId, syncShare} from './share.mjs';
 import {deleteHearing, deletePersona, listHearings, listPersonas, savePersona} from './store.mjs';
 
 const PORT = Number(process.env.TRIBUNAL_API_PORT ?? 5281);
@@ -51,7 +52,10 @@ const broadcast = (event, payload) => {
     for (const client of clients) client.write(frame);
 };
 
-const engine = createEngine((hearing) => broadcast('hearing', hearing));
+const engine = createEngine((hearing) => {
+    broadcast('hearing', hearing);
+    syncShare(hearing);
+});
 let claudeStatus = readClaudeStatus();
 
 app.get('/api/config', (_req, res) => {
@@ -77,9 +81,27 @@ const readMcpSources = async (isRefresh) => {
 app.get('/api/mcp-sources', async (req, res) => {
     try {
         const sources = await readMcpSources(Boolean(req.query.refresh));
-        res.json(sources.map(({name, status, readTools}) => ({name, status, readToolCount: readTools.length})));
+        res.json(sources.map(({name, status, origin, readTools}) => ({name, status, origin, readToolCount: readTools.length})));
     } catch (error) {
         res.status(500).json({error: error.message});
+    }
+});
+
+const AZURE_DEVOPS_SERVER = 'azure-devops';
+const AZURE_ORGANIZATION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+
+app.post('/api/mcp-sources/azure-devops', (req, res) => {
+    const organization = String(req.body?.organization ?? '').trim();
+    if (!AZURE_ORGANIZATION_PATTERN.test(organization)) {
+        res.status(400).json({error: "Nom d'organisation Azure DevOps invalide"});
+        return;
+    }
+    try {
+        addMcpServer(AZURE_DEVOPS_SERVER, ['npx', '-y', '@azure-devops/mcp', organization]);
+        mcpSources = null;
+        res.json({ok: true});
+    } catch (error) {
+        res.status(400).json({error: error.message});
     }
 });
 
@@ -107,11 +129,24 @@ app.post('/api/hearings', async (req, res) => {
     }
     try {
         const hasSources = Array.isArray(req.body?.sources) && req.body.sources.length > 0;
-        res.json(engine.open(req.body ?? {}, hasSources ? await readMcpSources(false) : []));
+        const hearing = engine.open(req.body ?? {}, hasSources ? await readMcpSources(false) : []);
+        if (isShareId(req.body?.shareId)) bindShare(req.body.shareId, hearing, (intervention) => engine.intervene(hearing.id, intervention));
+        res.json(hearing);
     } catch (error) {
         res.status(409).json({error: error.message});
     }
 });
+
+app.post('/api/hearings/:id/intervene', (req, res) => {
+    const isAccepted = engine.intervene(req.params.id, req.body ?? {});
+    if (!isAccepted) {
+        res.status(409).json({error: "L'audience n'accepte pas d'intervention pour le moment"});
+        return;
+    }
+    res.json({ok: true});
+});
+
+app.post('/api/shares', (_req, res) => res.json(createShare()));
 
 app.post('/api/hearings/:id/adjourn', (req, res) => res.json({ok: engine.adjourn(req.params.id)}));
 

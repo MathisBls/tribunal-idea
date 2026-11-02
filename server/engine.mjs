@@ -23,6 +23,7 @@ Avec les outils fournis, uniquement en lecture, rassemble les faits utiles : él
 N'écris rien pendant tes recherches. À la fin, rends un dossier factuel en texte simple, sans markdown, 200 mots maximum, en citant les références (clé de ticket, numéro de PR, titre de page). Si tu ne trouves rien d'utile, dis-le en une phrase.`;
 
 const MAX_GUESTS = 8;
+const MAX_INTERVENTION_LENGTH = 600;
 const MAX_GUEST_NAME_LENGTH = 40;
 
 const sanitizeGuests = (guests) =>
@@ -38,7 +39,7 @@ const clampNumber = (value, min, max, fallback) => {
 function buildTranscript(hearing) {
     return hearing.messages
         .filter((message) => message.text && message.kind !== 'erreur')
-        .map((message) => `${findPersona(message.personaId)?.name ?? '?'} : ${message.text}`)
+        .map((message) => `${message.authorName ?? findPersona(message.personaId)?.name ?? '?'}${message.kind === 'intervention' ? ' (invité, intervient à la barre)' : ''} : ${message.text}`)
         .join('\n\n');
 }
 
@@ -65,7 +66,7 @@ export function createEngine(onUpdate) {
 
     async function speak(hearing, personaId, instruction, kind, {systemPrompt, allowedTools} = {}) {
         const persona = findPersona(personaId);
-        const message = {id: String(hearing.messages.length), personaId, kind, text: '', isSpeaking: true, at: new Date().toISOString()};
+        const message = {id: `${hearing.messages.length}-${Date.now()}`, personaId, kind, text: '', isSpeaking: true, at: new Date().toISOString()};
         hearing.messages.push(message);
         hearing.speakerId = personaId;
         persist(hearing);
@@ -93,6 +94,27 @@ export function createEngine(onUpdate) {
         persist(hearing);
     }
 
+    /**
+     * A question addressed to a member suspends the debate: that member answers before the next speaker.
+     */
+    async function answerPendingQuestions(hearing) {
+        while (hearing.pendingQuestions.length > 0 && hearing.status !== 'ajournee') {
+            const question = hearing.pendingQuestions.shift();
+            hearing.isSuspended = true;
+            persist(hearing);
+            await speak(
+                hearing,
+                question.targetId,
+                `${question.name}, invité dans la salle, t'interroge directement à la barre : « ${question.text} ». Réponds-lui directement et concrètement. L'audience reprendra ensuite.`,
+                'reponse',
+            );
+        }
+        if (hearing.isSuspended) {
+            hearing.isSuspended = false;
+            persist(hearing);
+        }
+    }
+
     async function hold(hearing) {
         running = hearing;
         try {
@@ -104,6 +126,7 @@ export function createEngine(onUpdate) {
             for (let round = 1; round <= hearing.rounds; round++) {
                 hearing.round = round;
                 for (const personaId of hearing.memberIds) {
+                    await answerPendingQuestions(hearing);
                     if (hearing.status === 'ajournee') return;
                     const instruction =
                         round === 1
@@ -112,6 +135,7 @@ export function createEngine(onUpdate) {
                     await speak(hearing, personaId, instruction, 'plaidoirie');
                 }
             }
+            await answerPendingQuestions(hearing);
             if (hearing.status === 'ajournee') return;
             hearing.status = 'deliberation';
             persist(hearing);
@@ -145,6 +169,8 @@ export function createEngine(onUpdate) {
                 rounds: clampNumber(rounds, MIN_ROUNDS, MAX_ROUNDS, 2),
                 sources: chosenSources.map((source) => source.name),
                 guests: sanitizeGuests(guests),
+                pendingQuestions: [],
+                isSuspended: false,
                 allowedTools: chosenSources.flatMap((source) => source.readTools),
                 status: 'en_cours',
                 round: 0,
@@ -164,5 +190,25 @@ export function createEngine(onUpdate) {
             return true;
         },
         isRunningHearing: (id) => running?.id === id,
+        intervene(id, {name, text, targetId}) {
+            if (!running || running.id !== id) return false;
+            const cleanName = String(name ?? '').trim().slice(0, MAX_GUEST_NAME_LENGTH);
+            const cleanText = String(text ?? '').trim().slice(0, MAX_INTERVENTION_LENGTH);
+            if (!cleanName || !cleanText) return false;
+            const isTargetSeated = targetId === PRESIDING_JUDGE.id || running.memberIds.includes(targetId);
+            if (isTargetSeated) running.pendingQuestions.push({name: cleanName, text: cleanText, targetId});
+            running.messages.push({
+                id: `${running.messages.length}-${Date.now()}`,
+                personaId: `guest-${cleanName}`,
+                authorName: cleanName,
+                kind: 'intervention',
+                targetId: isTargetSeated ? targetId : null,
+                text: cleanText,
+                isSpeaking: false,
+                at: new Date().toISOString(),
+            });
+            persist(running);
+            return true;
+        },
     };
 }

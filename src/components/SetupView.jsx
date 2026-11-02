@@ -1,15 +1,16 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useMemo, useState} from 'react';
 
 import Avatar from './Avatar.jsx';
 import GuestList from './GuestList.jsx';
 import PersonaEditor from './PersonaEditor.jsx';
 import Select from './Select.jsx';
+import SourcePicker from './SourcePicker.jsx';
 import {api} from '../api.js';
+import {buildInviteLink} from '../guest-relay.js';
 import {buildSeatPositions} from '../seat-layout.js';
 
 const DEFAULT_SEAT_COUNT = 4;
 const DRAG_TYPE = 'application/x-tribunal-persona';
-const CONNECTED_STATUS = 'connected';
 const MODEL_HINTS = {sonnet: 'Équilibré', opus: 'Le plus fin, plus lent', haiku: 'Rapide et léger'};
 
 const readDrag = (event) => {
@@ -32,13 +33,10 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
     const [isLobbyHovered, setIsLobbyHovered] = useState(false);
     const [error, setError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [mcpSources, setMcpSources] = useState(null);
     const [selectedSources, setSelectedSources] = useState([]);
     const [guests, setGuests] = useState([]);
+    const [share, setShare] = useState(null);
 
-    useEffect(() => {
-        api.mcpSources().then(setMcpSources).catch(() => setMcpSources([]));
-    }, []);
 
     const personaById = new Map(personas.map((persona) => [persona.id, persona]));
     const seatedIds = new Set(seats.filter(Boolean));
@@ -87,7 +85,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
         setError('');
         setIsSubmitting(true);
         try {
-            await onOpenHearing({question, context, memberIds: filledSeats, model, rounds, sources: selectedSources, guests});
+            await onOpenHearing({question, context, memberIds: filledSeats, model, rounds, sources: selectedSources, guests, shareId: share?.shareId});
         } catch (openError) {
             setError(openError.message);
         } finally {
@@ -95,9 +93,8 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
         }
     };
 
-    const refreshSources = () => {
-        setMcpSources(null);
-        api.mcpSources(true).then(setMcpSources).catch(() => setMcpSources([]));
+    const ensureShare = () => {
+        if (!share) api.createShare().then(setShare).catch(() => setShare(null));
     };
 
     const toggleSource = (name) => setSelectedSources((current) => (current.includes(name) ? current.filter((source) => source !== name) : [...current, name]));
@@ -167,7 +164,7 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                                 + Joindre des pièces au dossier
                             </button>
                         )}
-                        <GuestList guests={guests} onChange={setGuests} />
+                        <GuestList guests={guests} onChange={setGuests} inviteLink={share ? buildInviteLink(share) : null} onPanelOpen={ensureShare} />
                     </div>
 
                     <ol className="room-seats">
@@ -278,36 +275,8 @@ export default function SetupView({config, personas, isClaudeReady, isBusy, onOp
                             Le greffier consulte vos outils connectés à Claude Code, en lecture seule, et verse un dossier factuel avant les débats.
                         </p>
                     </div>
-                    <button type="button" className="link-button small" onClick={refreshSources} disabled={mcpSources === null}>
-                        Actualiser
-                    </button>
                 </div>
-                {mcpSources === null ? (
-                    <p className="muted small">Recherche de vos outils…</p>
-                ) : mcpSources.length === 0 ? (
-                    <p className="muted small">Aucun outil MCP trouvé dans votre Claude Code.</p>
-                ) : (
-                    <ul className="source-list">
-                        {mcpSources.map((source) => {
-                            const isUsable = source.status === CONNECTED_STATUS && source.readToolCount > 0;
-                            const isSelected = selectedSources.includes(source.name);
-                            return (
-                                <li key={source.name}>
-                                    <button
-                                        type="button"
-                                        className={`source-chip${isSelected ? ' is-selected' : ''}`}
-                                        disabled={!isUsable}
-                                        onClick={() => toggleSource(source.name)}
-                                        title={isUsable ? `${source.readToolCount} outil${source.readToolCount > 1 ? 's' : ''} de lecture` : 'À connecter dans Claude Code'}
-                                    >
-                                        {source.name.replace(/^claude.ai /, '')}
-                                        {!isUsable && <span className="muted small"> · à connecter</span>}
-                                    </button>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                )}
+                <SourcePicker selectedSources={selectedSources} onToggle={toggleSource} />
             </section>
 
             <section className="launch-bar">

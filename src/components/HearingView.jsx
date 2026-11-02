@@ -1,7 +1,8 @@
 import {lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 
 import Avatar from './Avatar.jsx';
-import GuestList from './GuestList.jsx';
+import GuestList, {toGuestPersona} from './GuestList.jsx';
+import InterventionComposer from './InterventionComposer.jsx';
 import {api} from '../api.js';
 import {buildSeatPositions} from '../seat-layout.js';
 import {parseVerdict} from '../verdict.js';
@@ -15,7 +16,7 @@ const STATUS_LABELS = {
     ajournee: 'Ajournée',
 };
 
-const KIND_LABELS = {dossier: 'Dossier', ouverture: 'Ouverture', verdict: 'Verdict', erreur: 'Erreur'};
+const KIND_LABELS = {dossier: 'Dossier', ouverture: 'Ouverture', intervention: 'À la barre', reponse: 'Réponse', verdict: 'Verdict', erreur: 'Erreur'};
 const PRESIDING_JUDGE_ID = 'president';
 const CLERK_ID = 'clerk';
 const DRAWER_WIDTH_KEY = 'tribunal.drawerWidth';
@@ -221,7 +222,7 @@ function CourtFloor({hearing, judge, clerk, members}) {
     );
 }
 
-export default function HearingView({hearing, personasById, is3dUnlocked, onNewHearing}) {
+export default function HearingView({hearing, personasById, is3dUnlocked = false, onNewHearing, isGuest = false, onIntervene}) {
     const [is3dShown, setIs3dShown] = useState(false);
     const [isDrawerOpen, setIsDrawerOpen] = useState(true);
     const {width, startResize} = useResizableWidth();
@@ -230,6 +231,8 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
     const judge = personasById.get(PRESIDING_JUDGE_ID);
     const clerk = personasById.get(CLERK_ID);
     const lastMessage = hearing.messages.at(-1);
+    const resolveAuthor = (message) => personasById.get(message.personaId) ?? (message.authorName ? toGuestPersona({name: message.authorName}, 0) : null);
+    const sendIntervention = onIntervene ?? ((intervention) => api.intervene(hearing.id, intervention));
     const {scroller, onScroll, jumpToBottom, isAtBottom} = useFollowScroll(`${hearing.messages.length}:${lastMessage?.text?.length ?? 0}:${isDrawerOpen}`);
 
     useEffect(() => {
@@ -245,13 +248,14 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
                         {STATUS_LABELS[hearing.status] ?? hearing.status}
                         {hearing.status === 'en_cours' && hearing.round > 0 && ` · tour ${hearing.round}/${hearing.rounds}`}
                     </span>
+                    {hearing.isSuspended && <span className="suspended-badge">Audience suspendue · question à la barre</span>}
                     <div className="hearing-actions">
                         {is3dUnlocked && (
                             <button type="button" className="button small ghost" onClick={() => setIs3dShown((shown) => !shown)}>
                                 {is3dShown ? 'Plan de salle' : 'Salle 3D'}
                             </button>
                         )}
-                        {isLive && (
+                        {isLive && !isGuest && (
                             <button type="button" className="button small danger ghost" onClick={() => api.adjourn(hearing.id)}>
                                 Ajourner
                             </button>
@@ -261,9 +265,11 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
                                 Transcription
                             </button>
                         )}
-                        <button type="button" className="button small" onClick={onNewHearing}>
-                            Nouvelle audience
-                        </button>
+                        {!isGuest && (
+                            <button type="button" className="button small" onClick={onNewHearing}>
+                                Nouvelle audience
+                            </button>
+                        )}
                     </div>
                 </div>
                 {is3dShown ? (
@@ -293,7 +299,8 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
                     <div className="transcript-scroller" ref={scroller} onScroll={onScroll}>
                         <ol className="transcript">
                             {hearing.messages.map((message) => {
-                                const persona = personasById.get(message.personaId);
+                                const persona = resolveAuthor(message);
+                                const target = message.targetId ? personasById.get(message.targetId) : null;
                                 if (message.kind === 'verdict' && !message.isSpeaking) {
                                     return (
                                         <li key={message.id} className="transcript-verdict">
@@ -309,6 +316,7 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
                                                 <strong>{persona?.name ?? 'Membre retiré'}</strong>
                                                 <span className="muted small">{persona?.role}</span>
                                                 {KIND_LABELS[message.kind] && <span className={`kind-tag kind-tag-${message.kind}`}>{KIND_LABELS[message.kind]}</span>}
+                                                {target && <span className="muted small">à {target.name}</span>}
                                             </div>
                                             <p>
                                                 {message.text}
@@ -326,6 +334,7 @@ export default function HearingView({hearing, personasById, is3dUnlocked, onNewH
                             })}
                         </ol>
                     </div>
+                    {isLive && <InterventionComposer court={[judge, ...members].filter(Boolean)} onSend={sendIntervention} />}
                     {!isAtBottom && (
                         <button type="button" className="jump-to-bottom" onClick={jumpToBottom} aria-label="Aller au dernier message et suivre">
                             ↓

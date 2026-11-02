@@ -27,9 +27,21 @@ function PersonPlusIcon() {
 /**
  * Guests of a hearing, shown as small courtroom characters with their names, plus the invite button.
  */
-export default function GuestList({guests, onChange, isReadOnly = false}) {
+export default function GuestList({guests, onChange, inviteLink = null, onPanelOpen, isReadOnly = false}) {
     const [isPanelOpen, setIsPanelOpen] = useState(false);
     const [name, setName] = useState('');
+    const [isCopied, setIsCopied] = useState(false);
+    const isLocalLink = Boolean(inviteLink) && /\/\/(localhost|127\.0\.0\.1)/.test(inviteLink);
+
+    const copyLink = async () => {
+        try {
+            await navigator.clipboard.writeText(inviteLink);
+            setIsCopied(true);
+            setTimeout(() => setIsCopied(false), 1800);
+        } catch {
+            setIsCopied(false);
+        }
+    };
     const container = useRef(null);
 
     useEffect(() => {
@@ -74,7 +86,10 @@ export default function GuestList({guests, onChange, isReadOnly = false}) {
                         <button
                             type="button"
                             className={`invite-button${isPanelOpen ? ' is-active' : ''}`}
-                            onClick={() => setIsPanelOpen((open) => !open)}
+                            onClick={() => {
+                                if (!isPanelOpen) onPanelOpen?.();
+                                setIsPanelOpen((open) => !open);
+                            }}
                             aria-label="Inviter quelqu'un"
                             title="Inviter quelqu'un"
                         >
@@ -107,10 +122,17 @@ export default function GuestList({guests, onChange, isReadOnly = false}) {
                             Ajouter
                         </button>
                     </div>
-                    <button type="button" className="button small invite-link" disabled title="Le partage en ligne arrive avec le relais hébergé">
-                        Copier le lien d'invitation
-                    </button>
-                    <p className="muted small">Lien disponible dès que le relais en ligne est branché.</p>
+                    <div className="invite-link-row">
+                        <input readOnly value={inviteLink ?? 'Création du lien…'} onFocus={(event) => event.target.select()} aria-label="Lien d'invitation" />
+                        <button type="button" className="button small" onClick={copyLink} disabled={!inviteLink}>
+                            {isCopied ? 'Copié' : 'Copier'}
+                        </button>
+                    </div>
+                    <p className="muted small">
+                        {isLocalLink
+                            ? 'Lien local : il marchera pour les autres une fois le site déployé en ligne.'
+                            : 'Chiffré de bout en bout : seuls ceux qui ont le lien peuvent suivre.'}
+                    </p>
                 </div>
             )}
         </div>
