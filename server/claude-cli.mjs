@@ -21,7 +21,15 @@ function resolveClaudeCommand() {
     return 'claude';
 }
 
-const CLAUDE_COMMAND = resolveClaudeCommand();
+const claudeCommand = () => resolveClaudeCommand();
+let workingDirectory = null;
+
+/**
+ * Folder the CLI runs from, so the MCP servers declared in that project's .mcp.json are loaded too.
+ */
+export function setClaudeWorkingDirectory(directory) {
+    workingDirectory = directory || null;
+}
 
 /**
  * Environment of the CLI child: the user's own login is used, never a session inherited from a parent Claude, and
@@ -52,6 +60,27 @@ const STDIO_LIST_TIMEOUT_MS = 90_000;
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const PENDING_STATUS = 'pending';
 const USER_ORIGIN = 'user';
+
+/**
+ * Claude Code projects of this machine that declare their own MCP servers in a .mcp.json file.
+ */
+export function listMcpProjects() {
+    try {
+        const config = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+        return Object.keys(config.projects ?? {})
+            .map((directory) => {
+                try {
+                    const projectConfig = JSON.parse(fs.readFileSync(path.join(directory, '.mcp.json'), 'utf8'));
+                    return {path: path.normalize(directory), name: path.basename(directory), servers: Object.keys(projectConfig.mcpServers ?? {})};
+                } catch {
+                    return null;
+                }
+            })
+            .filter((project) => project && project.servers.length > 0);
+    } catch {
+        return [];
+    }
+}
 
 function readUserMcpConfig(name) {
     try {
@@ -134,10 +163,11 @@ export async function discoverMcpSources() {
  */
 function readAnnouncedSources() {
     return new Promise((resolve, reject) => {
-        const child = spawn(CLAUDE_COMMAND, ['-p', '--model', 'haiku', '--tools', '', '--no-session-persistence', '--output-format', 'stream-json', '--verbose'], {
+        const child = spawn(claudeCommand(), ['-p', '--model', 'haiku', '--tools', '', '--no-session-persistence', '--output-format', 'stream-json', '--verbose'], {
             env: buildChildEnvironment(),
+            cwd: workingDirectory ?? undefined,
             windowsHide: true,
-            shell: IS_WINDOWS && !CLAUDE_COMMAND.endsWith('.exe'),
+            shell: IS_WINDOWS && !claudeCommand().endsWith('.exe'),
             stdio: ['pipe', 'pipe', 'ignore'],
         });
         const timeout = setTimeout(() => child.kill(), DISCOVERY_TIMEOUT_MS);
@@ -184,10 +214,10 @@ function readAnnouncedSources() {
  * Registers an MCP server in the user's Claude Code configuration, for every project.
  */
 export function addMcpServer(name, commandArgs) {
-    const result = spawnSync(CLAUDE_COMMAND, ['mcp', 'add', '--scope', 'user', name, '--', ...commandArgs], {
+    const result = spawnSync(claudeCommand(), ['mcp', 'add', '--scope', 'user', name, '--', ...commandArgs], {
         encoding: 'utf8',
         env: buildChildEnvironment(),
-        shell: IS_WINDOWS && !CLAUDE_COMMAND.endsWith('.exe'),
+        shell: IS_WINDOWS && !claudeCommand().endsWith('.exe'),
         timeout: 30_000,
     });
     if (result.error || result.status !== 0) throw new Error((result.stderr || result.stdout || 'Ajout impossible').trim().split('\n').at(-1));
@@ -197,7 +227,7 @@ export function addMcpServer(name, commandArgs) {
  * Tells whether Claude Code is installed and logged in on this machine, without spending any quota.
  */
 export function readClaudeStatus() {
-    const version = spawnSync(CLAUDE_COMMAND, ['--version'], {encoding: 'utf8', shell: IS_WINDOWS && !CLAUDE_COMMAND.endsWith('.exe'), timeout: 15_000});
+    const version = spawnSync(claudeCommand(), ['--version'], {encoding: 'utf8', shell: IS_WINDOWS && !claudeCommand().endsWith('.exe'), timeout: 15_000});
     if (version.error || version.status !== 0) {
         return {installed: false, loggedIn: false, version: null, method: null};
     }
@@ -228,10 +258,11 @@ export function runClaudeTurn({systemPrompt, prompt, model, allowedTools = [], o
             '--system-prompt', systemPrompt,
             ...(allowedTools.length > 0 ? ['--allowedTools', allowedTools.join(',')] : ['--strict-mcp-config']),
         ];
-        const child = spawn(CLAUDE_COMMAND, args, {
+        const child = spawn(claudeCommand(), args, {
             env: buildChildEnvironment(),
+            cwd: workingDirectory ?? undefined,
             windowsHide: true,
-            shell: IS_WINDOWS && !CLAUDE_COMMAND.endsWith('.exe'),
+            shell: IS_WINDOWS && !claudeCommand().endsWith('.exe'),
             stdio: ['pipe', 'pipe', 'pipe'],
         });
         const timeout = setTimeout(() => child.kill(), allowedTools.length > 0 ? TOOL_TURN_TIMEOUT_MS : TURN_TIMEOUT_MS);

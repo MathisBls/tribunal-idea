@@ -3,10 +3,13 @@ import express from 'express';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {addMcpServer, discoverMcpSources, readClaudeStatus} from './claude-cli.mjs';
+import fs from 'node:fs';
+
+import {addMcpServer, discoverMcpSources, listMcpProjects, readClaudeStatus, setClaudeWorkingDirectory} from './claude-cli.mjs';
 import {COURT_CLERK, PERSONA_CHARACTERS, PERSONA_COLORS, PRESIDING_JUDGE} from './default-personas.mjs';
 import {ALLOWED_MODELS, MAX_SEATS, MIN_SEATS, createEngine} from './engine.mjs';
 import {bindShare, createShare, isShareId, syncShare} from './share.mjs';
+import {readSettings, saveSettings} from './store.mjs';
 import {deleteHearing, deletePersona, listHearings, listPersonas, savePersona} from './store.mjs';
 
 const PORT = Number(process.env.TRIBUNAL_API_PORT ?? 5281);
@@ -52,6 +55,21 @@ const broadcast = (event, payload) => {
     for (const client of clients) client.write(frame);
 };
 
+const isDirectory = (directory) => {
+    try {
+        return fs.statSync(directory).isDirectory();
+    } catch {
+        return false;
+    }
+};
+
+let settings = readSettings();
+if (!settings.projectDir) {
+    const projects = listMcpProjects();
+    if (projects.length === 1) settings = saveSettings({...settings, projectDir: projects[0].path});
+}
+setClaudeWorkingDirectory(isDirectory(settings.projectDir) ? settings.projectDir : null);
+
 const engine = createEngine((hearing) => {
     broadcast('hearing', hearing);
     syncShare(hearing);
@@ -85,6 +103,20 @@ app.get('/api/mcp-sources', async (req, res) => {
     } catch (error) {
         res.status(500).json({error: error.message});
     }
+});
+
+app.get('/api/settings', (_req, res) => res.json({...settings, projects: listMcpProjects()}));
+
+app.post('/api/settings', (req, res) => {
+    const projectDir = String(req.body?.projectDir ?? '').trim();
+    if (projectDir && !isDirectory(projectDir)) {
+        res.status(400).json({error: 'Ce dossier est introuvable sur cette machine'});
+        return;
+    }
+    settings = saveSettings({...settings, projectDir: projectDir || null});
+    setClaudeWorkingDirectory(settings.projectDir);
+    mcpSources = null;
+    res.json({...settings, projects: listMcpProjects()});
 });
 
 const AZURE_DEVOPS_SERVER = 'azure-devops';

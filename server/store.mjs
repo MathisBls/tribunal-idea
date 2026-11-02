@@ -7,6 +7,21 @@ import {COURT_CLERK, DEFAULT_PERSONAS, PERSONA_CHARACTERS, PERSONA_COLORS, PRESI
 const DATA_DIR = process.env.TRIBUNAL_DATA_DIR ?? path.join(os.homedir(), '.tribunal');
 const HEARINGS_DIR = path.join(DATA_DIR, 'hearings');
 const CUSTOM_PERSONAS_FILE = path.join(DATA_DIR, 'personas.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+export function readSettings() {
+    try {
+        return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    } catch {
+        return {projectDir: null};
+    }
+}
+
+export function saveSettings(settings) {
+    fs.mkdirSync(DATA_DIR, {recursive: true});
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    return settings;
+}
 const MAX_FIELD_LENGTH = {name: 60, role: 80, persona: 1200};
 
 fs.mkdirSync(HEARINGS_DIR, {recursive: true});

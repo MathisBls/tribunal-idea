@@ -2368,3 +2368,34 @@ body.is-resizing {
         height: max(560px, calc(100vh - 250px));
     }
 }
+
+.project-dir {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.project-dir code {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-dir-hint {
+    flex-basis: 100%;
+}
+
+.project-dir-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.project-dir-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px;
+    font-size: 0.84rem;
+}

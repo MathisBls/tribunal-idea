@@ -1,11 +1,14 @@
 import {useEffect, useRef, useState} from 'react';
 
+import Select from './Select.jsx';
 import {api} from '../api.js';
 
 const CONNECTED_STATUS = 'connected';
 const CLAUDE_AI_ORIGIN = 'claudeai';
 const CLAUDE_AI_CONNECTORS_URL = 'https://claude.ai/settings/connectors';
 const AZURE_DEVOPS_SERVER = 'azure-devops';
+const NO_PROJECT = '';
+const OTHER_PROJECT = '__other__';
 
 const HIDDEN_SOURCES_KEY = 'tribunal.hiddenSources';
 
@@ -38,6 +41,10 @@ export default function SourcePicker({selectedSources, onToggle}) {
     const [error, setError] = useState('');
     const [hiddenSources, setHiddenSources] = useState(readHiddenSources);
     const [isShowingHidden, setIsShowingHidden] = useState(false);
+    const [projectDir, setProjectDir] = useState(null);
+    const [projects, setProjects] = useState([]);
+    const [projectDirDraft, setProjectDirDraft] = useState('');
+    const [isEditingProjectDir, setIsEditingProjectDir] = useState(false);
     const isAwaitingConnection = useRef(false);
 
     const loadSources = (isRefresh) => {
@@ -48,6 +55,12 @@ export default function SourcePicker({selectedSources, onToggle}) {
     };
 
     useEffect(() => {
+        api.settings()
+            .then((settings) => {
+                setProjectDir(settings.projectDir);
+                setProjects(settings.projects);
+            })
+            .catch(() => setProjectDir(null));
         loadSources(false);
         const refreshAfterConnecting = () => {
             if (!isAwaitingConnection.current) return;
@@ -70,7 +83,78 @@ export default function SourcePicker({selectedSources, onToggle}) {
         }
     };
 
-    if (sources === null) return <p className="muted small">Recherche de vos outils…</p>;
+    const applyProjectDir = async (directory) => {
+        setError('');
+        try {
+            const settings = await api.saveSettings({projectDir: directory});
+            setProjectDir(settings.projectDir);
+            setProjects(settings.projects);
+            setIsEditingProjectDir(false);
+            loadSources(true);
+        } catch (saveError) {
+            setError(saveError.message);
+        }
+    };
+
+    const chooseProject = (value) => {
+        if (value === OTHER_PROJECT) {
+            setProjectDirDraft(projectDir ?? '');
+            setIsEditingProjectDir(true);
+            return;
+        }
+        applyProjectDir(value);
+    };
+
+    const projectOptions = [
+        {value: NO_PROJECT, label: 'Aucun projet', hint: 'Seulement vos outils personnels'},
+        ...projects.map((project) => ({value: project.path, label: project.name, hint: project.servers.join(', ')})),
+        ...(projectDir && !projects.some((project) => project.path === projectDir) ? [{value: projectDir, label: projectDir, hint: 'Dossier choisi'}] : []),
+        {value: OTHER_PROJECT, label: 'Autre dossier…', hint: 'Saisir un chemin'},
+    ];
+
+    const saveProjectDir = async (event) => {
+        event.preventDefault();
+        setError('');
+        try {
+            const settings = await api.saveSettings({projectDir: projectDirDraft});
+            setProjectDir(settings.projectDir);
+            setIsEditingProjectDir(false);
+            loadSources(true);
+        } catch (saveError) {
+            setError(saveError.message);
+        }
+    };
+
+    const projectDirRow = isEditingProjectDir ? (
+        <form className="project-dir-form" onSubmit={saveProjectDir}>
+            <input
+                value={projectDirDraft}
+                onChange={(event) => setProjectDirDraft(event.target.value)}
+                placeholder="C:\\chemin\\vers\\votre\\projet"
+                autoFocus
+            />
+            <button type="submit" className="button primary small">
+                Enregistrer
+            </button>
+            <button type="button" className="button ghost small" onClick={() => setIsEditingProjectDir(false)}>
+                Annuler
+            </button>
+        </form>
+    ) : (
+        <div className="project-dir">
+            <span className="source-group-title">Projet</span>
+            <Select value={projectDir ?? NO_PROJECT} options={projectOptions} onChange={chooseProject} label="Projet Claude Code" />
+            <span className="muted small">Ajoute les outils déclarés par ce projet, comme Jira.</span>
+        </div>
+    );
+
+    if (sources === null)
+        return (
+            <div className="source-picker">
+                {projectDirRow}
+                <p className="muted small">Recherche de vos outils…</p>
+            </div>
+        );
 
     const toggleHidden = (name) => {
         const next = hiddenSources.includes(name) ? hiddenSources.filter((hidden) => hidden !== name) : [...hiddenSources, name];
@@ -104,6 +188,7 @@ export default function SourcePicker({selectedSources, onToggle}) {
 
     return (
         <div className="source-picker">
+            {projectDirRow}
             <div className="source-group">
                 <span className="source-group-title">Prêts</span>
                 {readySources.length === 0 ? (
